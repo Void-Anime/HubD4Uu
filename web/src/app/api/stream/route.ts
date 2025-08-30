@@ -127,6 +127,38 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
       console.warn(`[STREAM-API] Direct content parsing failed:`, error.message);
     }
     
+    // NEW: Try to extract and process vcloud links from the content
+    try {
+      console.log(`[STREAM-API] Trying vcloud link extraction...`);
+      const response = await fetch(link, { signal });
+      if (response.ok) {
+        const content = await response.text();
+        const vcloudStreams = await extractVcloudStreams(content, signal);
+        if (vcloudStreams.length > 0) {
+          console.log(`[STREAM-API] Vcloud extraction found ${vcloudStreams.length} streams`);
+          allStreams.push(...vcloudStreams);
+        }
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] Vcloud extraction failed:`, error.message);
+    }
+    
+    // NEW: Try to extract and process filebee links from the content
+    try {
+      console.log(`[STREAM-API] Trying filebee link extraction...`);
+      const response = await fetch(link, { signal });
+      if (response.ok) {
+        const content = await response.text();
+        const filebeeStreams = await extractFilebeeStreams(content, signal);
+        if (filebeeStreams.length > 0) {
+          console.log(`[STREAM-API] Filebee extraction found ${filebeeStreams.length} streams`);
+          allStreams.push(...filebeeStreams);
+        }
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] Filebee extraction failed:`, error.message);
+    }
+    
     console.log(`[STREAM-API] Comprehensive extraction completed. Total streams found: ${allStreams.length}`);
     return allStreams;
     
@@ -206,6 +238,136 @@ async function extractDirectStreams(content: string, baseUrl: string) {
     
   } catch (error: any) {
     console.warn(`[STREAM-API] Direct stream extraction error:`, error.message);
+  }
+  
+  return streams;
+}
+
+// Extract and process vcloud links specifically
+async function extractVcloudStreams(content: string, signal: AbortSignal) {
+  const streams: any[] = [];
+  
+  try {
+    // Look for vcloud.lol links
+    const vcloudMatches = content.match(/https?:\/\/vcloud\.lol\/[^\s"']+/gi);
+    if (vcloudMatches) {
+      console.log(`[STREAM-API] Found ${vcloudMatches.length} vcloud links:`, vcloudMatches);
+      
+      for (const vcloudLink of vcloudMatches) {
+        try {
+          // Try to fetch the vcloud page
+          const response = await fetch(vcloudLink, { signal });
+          if (response.ok) {
+            const vcloudContent = await response.text();
+            
+            // Look for direct video links in vcloud content
+            const videoMatches = vcloudContent.match(/https?:\/\/[^\s"']*\.(?:mp4|m3u8|mkv|avi|mov|wmv|flv|webm)/gi);
+            if (videoMatches) {
+              videoMatches.forEach(match => {
+                streams.push({
+                  server: 'VCloud',
+                  link: match,
+                  type: match.split('.').pop() || 'mp4'
+                });
+              });
+            }
+            
+            // Look for iframe embeds
+            const iframeMatches = vcloudContent.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/gi);
+            if (iframeMatches) {
+              iframeMatches.forEach(match => {
+                const srcMatch = match.match(/src=["']([^"']+)["']/);
+                if (srcMatch && srcMatch[1]) {
+                  streams.push({
+                    server: 'VCloud Embed',
+                    link: srcMatch[1],
+                    type: 'iframe'
+                  });
+                }
+              });
+            }
+            
+            // Look for video elements
+            const videoElements = vcloudContent.match(/<video[^>]*src=["']([^"']+)["'][^>]*>/gi);
+            if (videoElements) {
+              videoElements.forEach(match => {
+                const srcMatch = match.match(/src=["']([^"']+)["']/);
+                if (srcMatch && srcMatch[1]) {
+                  streams.push({
+                    server: 'VCloud Video',
+                    link: srcMatch[1],
+                    type: 'mp4'
+                  });
+                }
+              });
+            }
+          }
+        } catch (error: any) {
+          console.warn(`[STREAM-API] Failed to process vcloud link ${vcloudLink}:`, error.message);
+        }
+      }
+    }
+    
+  } catch (error: any) {
+    console.warn(`[STREAM-API] Vcloud extraction error:`, error.message);
+  }
+  
+  return streams;
+}
+
+// Extract and process filebee links specifically
+async function extractFilebeeStreams(content: string, signal: AbortSignal) {
+  const streams: any[] = [];
+  
+  try {
+    // Look for filebee.xyz links
+    const filebeeMatches = content.match(/https?:\/\/filebee\.xyz\/[^\s"']+/gi);
+    if (filebeeMatches) {
+      console.log(`[STREAM-API] Found ${filebeeMatches.length} filebee links:`, filebeeMatches);
+      
+      for (const filebeeLink of filebeeMatches) {
+        try {
+          // Try to fetch the filebee page
+          const response = await fetch(filebeeLink, { signal });
+          if (response.ok) {
+            const filebeeContent = await response.text();
+            
+            // Look for direct video links in filebee content
+            const videoMatches = filebeeContent.match(/https?:\/\/[^\s"']*\.(?:mp4|m3u8|mkv|avi|mov|wmv|flv|webm)/gi);
+            if (videoMatches) {
+              videoMatches.forEach(match => {
+                streams.push({
+                  server: 'Filebee',
+                  link: match,
+                  type: match.split('.').pop() || 'mp4'
+                });
+              });
+            }
+            
+            // Look for download buttons or links
+            const downloadMatches = filebeeContent.match(/<a[^>]*href=["']([^"']*download[^"']*)["'][^>]*>/gi);
+            if (downloadMatches) {
+              downloadMatches.forEach(match => {
+                const hrefMatch = match.match(/href=["']([^"']+)["']/);
+                if (hrefMatch && hrefMatch[1]) {
+                  const link = hrefMatch[1].startsWith('http') ? hrefMatch[1] : new URL(hrefMatch[1], filebeeLink).href;
+                  streams.push({
+                    server: 'Filebee Download',
+                    link,
+                    type: 'mp4'
+                  });
+                }
+              });
+            }
+          }
+        } catch (error: any) {
+          console.warn(`[STREAM-API] Failed to process filebee link ${filebeeLink}:`, error.message);
+        }
+      }
+    }
+    
+  } catch (error: any) {
+    console.warn(`[STREAM-API] Filebee extraction error:`, error.message);
   }
   
   return streams;
