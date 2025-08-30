@@ -39,6 +39,13 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
   try {
     console.log(`[STREAM-API] Starting comprehensive extraction for: ${link}`);
     
+    // Add overall timeout for Vercel
+    const extractionController = new AbortController();
+    const extractionTimeout = setTimeout(() => extractionController.abort(), 25000); // 25 second timeout
+    
+    // Combine signals
+    const combinedSignal = AbortSignal.any([signal, extractionController.signal]);
+    
     // Import extractors directly to avoid circular dependencies
     const { hubcloudExtracter } = await import('@/server/extractors/hubcloud');
     const { gdFlixExtracter } = await import('@/server/extractors/gdflix');
@@ -48,7 +55,7 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
     // Try hubcloudExtracter first (most reliable)
     try {
       console.log(`[STREAM-API] Trying hubcloudExtracter...`);
-      const hubcloudResult = await hubcloudExtracter(link, signal);
+      const hubcloudResult = await hubcloudExtracter(link, combinedSignal);
       if (Array.isArray(hubcloudResult) && hubcloudResult.length > 0) {
         console.log(`[STREAM-API] hubcloudExtracter found ${hubcloudResult.length} streams`);
         allStreams.push(...hubcloudResult);
@@ -60,7 +67,7 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
     // Try gdFlixExtracter
     try {
       console.log(`[STREAM-API] Trying gdFlixExtracter...`);
-      const gdFlixResult = await gdFlixExtracter(link, signal);
+      const gdFlixResult = await gdFlixExtracter(link, combinedSignal);
       if (Array.isArray(gdFlixResult) && gdFlixResult.length > 0) {
         console.log(`[STREAM-API] gdFlixExtracter found ${gdFlixResult.length} streams`);
         allStreams.push(...gdFlixResult);
@@ -72,7 +79,12 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
     // Try superVideoExtractor (needs content first)
     try {
       console.log(`[STREAM-API] Trying superVideoExtractor...`);
-      const response = await fetch(link, { signal });
+      const response = await fetch(link, { 
+        signal: combinedSignal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
       if (response.ok) {
         const content = await response.text();
         const superVideoResult = await superVideoExtractor(content);
@@ -114,7 +126,12 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
     // Try direct content parsing as last resort
     try {
       console.log(`[STREAM-API] Trying direct content parsing...`);
-      const response = await fetch(link, { signal });
+      const response = await fetch(link, { 
+        signal: combinedSignal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
       if (response.ok) {
         const content = await response.text();
         const directStreams = await extractDirectStreams(content, link);
@@ -130,10 +147,15 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
     // NEW: Try to extract and process vcloud links from the content
     try {
       console.log(`[STREAM-API] Trying vcloud link extraction...`);
-      const response = await fetch(link, { signal });
+      const response = await fetch(link, { 
+        signal: combinedSignal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
       if (response.ok) {
         const content = await response.text();
-        const vcloudStreams = await extractVcloudStreams(content, signal);
+        const vcloudStreams = await extractVcloudStreams(content, combinedSignal);
         if (vcloudStreams.length > 0) {
           console.log(`[STREAM-API] Vcloud extraction found ${vcloudStreams.length} streams`);
           allStreams.push(...vcloudStreams);
@@ -146,10 +168,15 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
     // NEW: Try to extract and process filebee links from the content
     try {
       console.log(`[STREAM-API] Trying filebee link extraction...`);
-      const response = await fetch(link, { signal });
+      const response = await fetch(link, { 
+        signal: combinedSignal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+      });
       if (response.ok) {
         const content = await response.text();
-        const filebeeStreams = await extractFilebeeStreams(content, signal);
+        const filebeeStreams = await extractFilebeeStreams(content, combinedSignal);
         if (filebeeStreams.length > 0) {
           console.log(`[STREAM-API] Filebee extraction found ${filebeeStreams.length} streams`);
           allStreams.push(...filebeeStreams);
@@ -159,6 +186,7 @@ async function tryComprehensiveExtraction(link: string, type: string, signal: Ab
       console.warn(`[STREAM-API] Filebee extraction failed:`, error.message);
     }
     
+    clearTimeout(extractionTimeout);
     console.log(`[STREAM-API] Comprehensive extraction completed. Total streams found: ${allStreams.length}`);
     return allStreams;
     
@@ -253,10 +281,25 @@ async function extractVcloudStreams(content: string, signal: AbortSignal) {
     if (vcloudMatches) {
       console.log(`[STREAM-API] Found ${vcloudMatches.length} vcloud links:`, vcloudMatches);
       
-      for (const vcloudLink of vcloudMatches) {
+      // Limit to first 2 vcloud links to avoid timeout on Vercel
+      const limitedVcloudLinks = vcloudMatches.slice(0, 2);
+      
+      for (const vcloudLink of limitedVcloudLinks) {
         try {
+          // Add timeout for Vercel
+          const vcloudController = new AbortController();
+          const vcloudTimeout = setTimeout(() => vcloudController.abort(), 10000); // 10 second timeout
+          
           // Try to fetch the vcloud page
-          const response = await fetch(vcloudLink, { signal });
+          const response = await fetch(vcloudLink, { 
+            signal: vcloudController.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+          });
+          
+          clearTimeout(vcloudTimeout);
+          
           if (response.ok) {
             const vcloudContent = await response.text();
             
@@ -325,10 +368,25 @@ async function extractFilebeeStreams(content: string, signal: AbortSignal) {
     if (filebeeMatches) {
       console.log(`[STREAM-API] Found ${filebeeMatches.length} filebee links:`, filebeeMatches);
       
-      for (const filebeeLink of filebeeMatches) {
+      // Limit to first 2 filebee links to avoid timeout on Vercel
+      const limitedFilebeeLinks = filebeeMatches.slice(0, 2);
+      
+      for (const filebeeLink of limitedFilebeeLinks) {
         try {
+          // Add timeout for Vercel
+          const filebeeController = new AbortController();
+          const filebeeTimeout = setTimeout(() => filebeeController.abort(), 10000); // 10 second timeout
+          
           // Try to fetch the filebee page
-          const response = await fetch(filebeeLink, { signal });
+          const response = await fetch(filebeeLink, { 
+            signal: filebeeController.signal,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+          });
+          
+          clearTimeout(filebeeTimeout);
+          
           if (response.ok) {
             const filebeeContent = await response.text();
             
@@ -461,126 +519,143 @@ export async function GET(req: NextRequest) {
         providerContext,
       });
       
-      clearTimeout(timeoutId);
-      
-      console.log(`[STREAM-API] getStream completed successfully`);
-      console.log(`[STREAM-API] getStream result type:`, typeof data);
-      console.log(`[STREAM-API] getStream result:`, data);
-      console.log(`[STREAM-API] getStream result length:`, Array.isArray(data) ? data.length : 'not array');
-      
-      if (Array.isArray(data) && data.length === 0) {
-        console.warn(`[STREAM-API] getStream returned empty array - this might indicate extraction failure`);
-        console.warn(`[STREAM-API] This could be due to: URL parsing failure, HTTP request failure, content parsing failure, or extraction logic failure`);
+              clearTimeout(timeoutId);
         
-        // Try to get more debugging info from the provider module
-        try {
-          console.log(`[STREAM-API] Attempting to debug empty result...`);
-          
-          // Check if there are any debug functions available
-          const debugFn = (streamModule as any).debug || (streamModule as any).test || (streamModule as any).getInfo;
-          if (debugFn && typeof debugFn === 'function') {
-            console.log(`[STREAM-API] Found debug function, calling it...`);
-            const debugResult = await debugFn({ link, type, providerContext });
-            console.log(`[STREAM-API] Debug function result:`, debugResult);
-          }
-          
-          // Check if the module has any internal state or logs
-          if ((streamModule as any).logs) {
-            console.log(`[STREAM-API] Module logs:`, (streamModule as any).logs);
-          }
-          
-        } catch (debugError) {
-          console.warn(`[STREAM-API] Debug attempt failed:`, debugError);
-        }
+        console.log(`[STREAM-API] getStream completed successfully`);
+        console.log(`[STREAM-API] getStream result type:`, typeof data);
+        console.log(`[STREAM-API] getStream result:`, data);
+        console.log(`[STREAM-API] getStream result length:`, Array.isArray(data) ? data.length : 'not array');
         
-        // Try alternative URL formats if the original failed
-        console.log(`[STREAM-API] Attempting alternative URL formats...`);
-        const alternativeUrls = await generateAlternativeUrls(link);
-        
-        for (const altUrl of alternativeUrls) {
+        if (Array.isArray(data) && data.length === 0) {
+          console.warn(`[STREAM-API] getStream returned empty array - this might indicate extraction failure`);
+          console.warn(`[STREAM-API] This could be due to: URL parsing failure, HTTP request failure, content parsing failure, or extraction logic failure`);
+          
+          // Try to get more debugging info from the provider module
           try {
-            console.log(`[STREAM-API] Trying alternative URL: ${altUrl}`);
-            const altData = await getStream({
-              link: altUrl,
-              type,
-              signal: controller.signal,
-              providerContext,
-            });
+            console.log(`[STREAM-API] Attempting to debug empty result...`);
             
-            if (Array.isArray(altData) && altData.length > 0) {
-              console.log(`[STREAM-API] Alternative URL succeeded: ${altUrl}`);
-              console.log(`[STREAM-API] Alternative data:`, altData);
-              return NextResponse.json({data: altData, source: 'alternative-url'});
+            // Check if there are any debug functions available
+            const debugFn = (streamModule as any).debug || (streamModule as any).test || (streamModule as any).getInfo;
+            if (debugFn && typeof debugFn === 'function') {
+              console.log(`[STREAM-API] Found debug function, calling it...`);
+              const debugResult = await debugFn({ link, type, providerContext });
+              console.log(`[STREAM-API] Debug function result:`, debugResult);
             }
-          } catch (altError: any) {
-            console.warn(`[STREAM-API] Alternative URL failed: ${altUrl}`, altError.message);
+            
+            // Check if the module has any internal state or logs
+            if ((streamModule as any).logs) {
+              console.log(`[STREAM-API] Module logs:`, (streamModule as any).logs);
+            }
+            
+          } catch (debugError) {
+            console.warn(`[STREAM-API] Debug attempt failed:`, debugError);
           }
+          
+          // Try alternative URL formats if the original failed
+          console.log(`[STREAM-API] Attempting alternative URL formats...`);
+          const alternativeUrls = await generateAlternativeUrls(link);
+          
+          for (const altUrl of alternativeUrls) {
+            try {
+              console.log(`[STREAM-API] Trying alternative URL: ${altUrl}`);
+              const altData = await getStream({
+                link: altUrl,
+                type,
+                signal: controller.signal,
+                providerContext,
+              });
+              
+              if (Array.isArray(altData) && altData.length > 0) {
+                console.log(`[STREAM-API] Alternative URL succeeded: ${altUrl}`);
+                console.log(`[STREAM-API] Alternative data:`, altData);
+                return NextResponse.json({data: altData, source: 'alternative-url'});
+              }
+            } catch (altError: any) {
+              console.warn(`[STREAM-API] Alternative URL failed: ${altUrl}`, altError.message);
+            }
+          }
+          
+          // If all alternatives fail, try comprehensive extraction with all extractors
+          console.log(`[STREAM-API] All alternative URLs failed, trying comprehensive extraction...`);
+          const comprehensiveData = await tryComprehensiveExtraction(link, type, controller.signal);
+          
+          if (comprehensiveData.length > 0) {
+            console.log(`[STREAM-API] Comprehensive extraction succeeded with ${comprehensiveData.length} streams`);
+            return NextResponse.json({data: comprehensiveData, source: 'comprehensive-extraction'});
+          }
+          
+          // NEW: Try stream-fallback API as last resort
+          try {
+            console.log(`[STREAM-API] Comprehensive extraction failed, trying stream-fallback API...`);
+            const fallbackUrl = new URL('/api/stream-fallback', req.url);
+            fallbackUrl.searchParams.set('link', link);
+            fallbackUrl.searchParams.set('type', type);
+            
+            const fallbackResponse = await fetch(fallbackUrl.toString(), { signal: controller.signal });
+            if (fallbackResponse.ok) {
+              const fallbackData = await fallbackResponse.json();
+              if (fallbackData.data && Array.isArray(fallbackData.data) && fallbackData.data.length > 0) {
+                console.log(`[STREAM-API] Stream-fallback API succeeded with ${fallbackData.data.length} streams`);
+                return NextResponse.json({data: fallbackData.data, source: 'stream-fallback-api'});
+              }
+            }
+          } catch (fallbackError: any) {
+            console.warn(`[STREAM-API] Stream-fallback API failed:`, fallbackError.message);
+          }
+          
+          // If all alternatives fail, return a helpful error message
+          return NextResponse.json({
+            error: 'Content extraction failed',
+            details: 'The provider was unable to extract content from the URL. This could be due to:',
+            reasons: [
+              'The website is blocking automated requests (Cloudflare protection)',
+              'The content has been removed or is no longer available',
+              'The URL format is not supported by this provider',
+              'The provider module needs to be updated'
+            ],
+            suggestions: [
+              'Try refreshing the page',
+              'Check if the content is still available',
+              'Try a different provider if available',
+              'Contact support if the issue persists'
+            ],
+            originalUrl: link,
+            provider: providerValue
+          }, {status: 422});
         }
         
-        // If all alternatives fail, try comprehensive extraction with all extractors
-        console.log(`[STREAM-API] All alternative URLs failed, trying comprehensive extraction...`);
-        const comprehensiveData = await tryComprehensiveExtraction(link, type, controller.signal);
+        console.log(`[STREAM-API] Returning data:`, { data: data || [] });
         
-        if (comprehensiveData.length > 0) {
-          console.log(`[STREAM-API] Comprehensive extraction succeeded with ${comprehensiveData.length} streams`);
-          return NextResponse.json({data: comprehensiveData, source: 'comprehensive-extraction'});
+        return NextResponse.json({data: data || []});
+        
+      } catch (getStreamError: any) {
+        clearTimeout(timeoutId);
+        console.error(`[STREAM-API] getStream function threw an error:`, getStreamError);
+        console.error(`[STREAM-API] getStream error message:`, getStreamError?.message);
+        console.error(`[STREAM-API] getStream error stack:`, getStreamError?.stack);
+        
+        // Check if it's an abort error
+        if (getStreamError.name === 'AbortError') {
+          return NextResponse.json({
+            error: 'Request timeout - the provider took too long to respond',
+            details: 'Try again or check if the provider is working'
+          }, {status: 408});
         }
         
-        // If all alternatives fail, return a helpful error message
         return NextResponse.json({
-          error: 'Content extraction failed',
-          details: 'The provider was unable to extract content from the URL. This could be due to:',
-          reasons: [
-            'The website is blocking automated requests (Cloudflare protection)',
-            'The content has been removed or is no longer available',
-            'The URL format is not supported by this provider',
-            'The provider module needs to be updated'
-          ],
-          suggestions: [
-            'Try refreshing the page',
-            'Check if the content is still available',
-            'Try a different provider if available',
-            'Contact support if the issue persists'
-          ],
-          originalUrl: link,
-          provider: providerValue
-        }, {status: 422});
+          error: `getStream function failed: ${getStreamError?.message || 'Unknown error'}`,
+          details: process.env.NODE_ENV === 'development' ? getStreamError?.stack : undefined
+        }, {status: 500});
       }
       
-      console.log(`[STREAM-API] Returning data:`, { data: data || [] });
-      
-      return NextResponse.json({data: data || []});
-      
-    } catch (getStreamError: any) {
-      clearTimeout(timeoutId);
-      console.error(`[STREAM-API] getStream function threw an error:`, getStreamError);
-      console.error(`[STREAM-API] getStream error message:`, getStreamError?.message);
-      console.error(`[STREAM-API] getStream error stack:`, getStreamError?.stack);
-      
-      // Check if it's an abort error
-      if (getStreamError.name === 'AbortError') {
-        return NextResponse.json({
-          error: 'Request timeout - the provider took too long to respond',
-          details: 'Try again or check if the provider is working'
-        }, {status: 408});
-      }
+    } catch (e: any) {
+      console.error(`[STREAM-API] Error:`, e);
+      console.error(`[STREAM-API] Error stack:`, e?.stack);
+      console.error(`[STREAM-API] Error message:`, e?.message);
       
       return NextResponse.json({
-        error: `getStream function failed: ${getStreamError?.message || 'Unknown error'}`,
-        details: process.env.NODE_ENV === 'development' ? getStreamError?.stack : undefined
+        error: e?.message || 'Unknown error occurred',
+        details: process.env.NODE_ENV === 'development' ? e?.stack : undefined
       }, {status: 500});
     }
-    
-  } catch (e: any) {
-    console.error(`[STREAM-API] Error:`, e);
-    console.error(`[STREAM-API] Error stack:`, e?.stack);
-    console.error(`[STREAM-API] Error message:`, e?.message);
-    
-    return NextResponse.json({
-      error: e?.message || 'Unknown error occurred',
-      details: process.env.NODE_ENV === 'development' ? e?.stack : undefined
-    }, {status: 500});
   }
-}
-
-

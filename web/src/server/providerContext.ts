@@ -32,12 +32,6 @@ const enhancedAxios = axios.create({
 enhancedAxios.interceptors.request.use(
   (config) => {
     console.log(`[PROVIDER-CONTEXT] Making request to: ${config.url}`);
-    
-    // Add random delay to avoid rate limiting
-    if (Math.random() < 0.3) {
-      config.timeout = 35000; // Slightly longer timeout for some requests
-    }
-    
     return config;
   },
   (error) => {
@@ -64,63 +58,6 @@ enhancedAxios.interceptors.response.use(
   }
 );
 
-// Enhanced extractors with better error handling
-const enhancedExtractors = {
-  hubcloudExtracter: async (link: string, signal: AbortSignal) => {
-    try {
-      console.log(`[PROVIDER-CONTEXT] hubcloudExtracter called with:`, link);
-      const result = await hubcloudExtracter(link, signal);
-      console.log(`[PROVIDER-CONTEXT] hubcloudExtracter result:`, result);
-      return result;
-    } catch (error: any) {
-      console.error(`[PROVIDER-CONTEXT] hubcloudExtracter error:`, error.message);
-      return [];
-    }
-  },
-  
-  gofileExtracter: async (link: string, signal: AbortSignal) => {
-    try {
-      console.log(`[PROVIDER-CONTEXT] gofileExtracter called with:`, link);
-      // Extract the ID from the link if it's a full URL
-      const url = new URL(link);
-      const id = url.pathname.split('/').pop() || link;
-      const result = await gofileExtracter(id);
-      console.log(`[PROVIDER-CONTEXT] gofileExtracter result:`, result);
-      return result;
-    } catch (error: any) {
-      console.error(`[PROVIDER-CONTEXT] gofileExtracter error:`, error.message);
-      return { link: '', token: '' };
-    }
-  },
-  
-  superVideoExtractor: async (link: string, signal: AbortSignal) => {
-    try {
-      console.log(`[PROVIDER-CONTEXT] superVideoExtractor called with:`, link);
-      // superVideoExtractor expects data content, not a URL
-      // We need to fetch the content first
-      const response = await axios.get(link, { signal });
-      const result = await superVideoExtractor(response.data);
-      console.log(`[PROVIDER-CONTEXT] superVideoExtractor result:`, result);
-      return result;
-    } catch (error: any) {
-      console.error(`[PROVIDER-CONTEXT] superVideoExtractor error:`, error.message);
-      return '';
-    }
-  },
-  
-  gdFlixExtracter: async (link: string, signal: AbortSignal) => {
-    try {
-      console.log(`[PROVIDER-CONTEXT] gdFlixExtracter called with:`, link);
-      const result = await gdFlixExtracter(link, signal);
-      console.log(`[PROVIDER-CONTEXT] gdFlixExtracter result:`, result);
-      return result;
-    } catch (error: any) {
-      console.error(`[PROVIDER-CONTEXT] gdFlixExtracter error:`, error.message);
-      return [];
-    }
-  }
-};
-
 export const providerContext = {
   axios: enhancedAxios,
   getBaseUrl,
@@ -128,7 +65,12 @@ export const providerContext = {
   // Node: no expo-crypto; include a compatible subset if needed later
   Crypto: {} as any,
   cheerio,
-  extractors: enhancedExtractors,
+  extractors: {
+    hubcloudExtracter,
+    gofileExtracter,
+    superVideoExtractor,
+    gdFlixExtracter,
+  },
   
   // Add debugging utilities
   debug: {
