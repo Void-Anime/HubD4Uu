@@ -32,6 +32,185 @@ async function generateAlternativeUrls(originalUrl: string): Promise<string[]> {
   }
 }
 
+// Comprehensive extraction using all available extractors
+async function tryComprehensiveExtraction(link: string, type: string, signal: AbortSignal) {
+  const allStreams: any[] = [];
+  
+  try {
+    console.log(`[STREAM-API] Starting comprehensive extraction for: ${link}`);
+    
+    // Import extractors directly to avoid circular dependencies
+    const { hubcloudExtracter } = await import('@/server/extractors/hubcloud');
+    const { gdFlixExtracter } = await import('@/server/extractors/gdflix');
+    const { superVideoExtractor } = await import('@/server/extractors/superVideo');
+    const { gofileExtracter } = await import('@/server/extractors/gofile');
+    
+    // Try hubcloudExtracter first (most reliable)
+    try {
+      console.log(`[STREAM-API] Trying hubcloudExtracter...`);
+      const hubcloudResult = await hubcloudExtracter(link, signal);
+      if (Array.isArray(hubcloudResult) && hubcloudResult.length > 0) {
+        console.log(`[STREAM-API] hubcloudExtracter found ${hubcloudResult.length} streams`);
+        allStreams.push(...hubcloudResult);
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] hubcloudExtracter failed:`, error.message);
+    }
+    
+    // Try gdFlixExtracter
+    try {
+      console.log(`[STREAM-API] Trying gdFlixExtracter...`);
+      const gdFlixResult = await gdFlixExtracter(link, signal);
+      if (Array.isArray(gdFlixResult) && gdFlixResult.length > 0) {
+        console.log(`[STREAM-API] gdFlixExtracter found ${gdFlixResult.length} streams`);
+        allStreams.push(...gdFlixResult);
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] gdFlixExtracter failed:`, error.message);
+    }
+    
+    // Try superVideoExtractor (needs content first)
+    try {
+      console.log(`[STREAM-API] Trying superVideoExtractor...`);
+      const response = await fetch(link, { signal });
+      if (response.ok) {
+        const content = await response.text();
+        const superVideoResult = await superVideoExtractor(content);
+        if (superVideoResult && typeof superVideoResult === 'string' && superVideoResult.length > 0) {
+          console.log(`[STREAM-API] superVideoExtractor found stream:`, superVideoResult);
+          allStreams.push({
+            server: 'SuperVideo',
+            link: superVideoResult,
+            type: 'm3u8'
+          });
+        }
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] superVideoExtractor failed:`, error.message);
+    }
+    
+    // Try gofileExtracter (extract ID from URL)
+    try {
+      console.log(`[STREAM-API] Trying gofileExtracter...`);
+      const url = new URL(link);
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      const lastPart = pathParts[pathParts.length - 1];
+      
+      if (lastPart && lastPart.length > 5) { // Basic validation
+        const gofileResult = await gofileExtracter(lastPart);
+        if (gofileResult && gofileResult.link && gofileResult.link.length > 0) {
+          console.log(`[STREAM-API] gofileExtracter found stream:`, gofileResult.link);
+          allStreams.push({
+            server: 'GoFile',
+            link: gofileResult.link,
+            type: 'mp4'
+          });
+        }
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] gofileExtracter failed:`, error.message);
+    }
+    
+    // Try direct content parsing as last resort
+    try {
+      console.log(`[STREAM-API] Trying direct content parsing...`);
+      const response = await fetch(link, { signal });
+      if (response.ok) {
+        const content = await response.text();
+        const directStreams = await extractDirectStreams(content, link);
+        if (directStreams.length > 0) {
+          console.log(`[STREAM-API] Direct parsing found ${directStreams.length} streams`);
+          allStreams.push(...directStreams);
+        }
+      }
+    } catch (error: any) {
+      console.warn(`[STREAM-API] Direct content parsing failed:`, error.message);
+    }
+    
+    console.log(`[STREAM-API] Comprehensive extraction completed. Total streams found: ${allStreams.length}`);
+    return allStreams;
+    
+  } catch (error: any) {
+    console.error(`[STREAM-API] Comprehensive extraction error:`, error.message);
+    return [];
+  }
+}
+
+// Extract streams directly from HTML content
+async function extractDirectStreams(content: string, baseUrl: string) {
+  const streams: any[] = [];
+  
+  try {
+    // Look for video elements
+    const videoMatches = content.match(/<video[^>]*src=["']([^"']+)["'][^>]*>/gi);
+    if (videoMatches) {
+      videoMatches.forEach(match => {
+        const srcMatch = match.match(/src=["']([^"']+)["']/);
+        if (srcMatch && srcMatch[1]) {
+          const link = srcMatch[1].startsWith('http') ? srcMatch[1] : new URL(srcMatch[1], baseUrl).href;
+          streams.push({
+            server: 'HTML5 Video',
+            link,
+            type: 'mp4'
+          });
+        }
+      });
+    }
+    
+    // Look for iframe embeds
+    const iframeMatches = content.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/gi);
+    if (iframeMatches) {
+      iframeMatches.forEach(match => {
+        const srcMatch = match.match(/src=["']([^"']+)["']/);
+        if (srcMatch && srcMatch[1]) {
+          const link = srcMatch[1].startsWith('http') ? srcMatch[1] : new URL(srcMatch[1], baseUrl).href;
+          streams.push({
+            server: 'Embedded Player',
+            link,
+            type: 'iframe'
+          });
+        }
+      });
+    }
+    
+    // Look for common video file extensions
+    const videoFileMatches = content.match(/https?:\/\/[^\s"']*\.(?:mp4|m3u8|mkv|avi|mov|wmv|flv|webm)/gi);
+    if (videoFileMatches) {
+      videoFileMatches.forEach(match => {
+        streams.push({
+          server: 'Direct Link',
+          link: match,
+          type: match.split('.').pop() || 'mp4'
+        });
+      });
+    }
+    
+    // Look for common video hosting patterns
+    const hostingPatterns = [
+      /https?:\/\/[^\s"']*\.(?:cloudflare|fastly|bunny|streamable)\.com[^\s"']*/gi,
+      /https?:\/\/[^\s"']*\.(?:youtube|vimeo|dailymotion)\.com[^\s"']*/gi
+    ];
+    
+    hostingPatterns.forEach(pattern => {
+      const matches = content.match(pattern);
+      if (matches) {
+        matches.forEach(match => {
+          streams.push({
+            server: 'Video Hosting',
+            link: match,
+            type: 'embed'
+          });
+        });
+      }
+    });
+    
+  } catch (error: any) {
+    console.warn(`[STREAM-API] Direct stream extraction error:`, error.message);
+  }
+  
+  return streams;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const {searchParams} = new URL(req.url);
@@ -174,6 +353,15 @@ export async function GET(req: NextRequest) {
           } catch (altError: any) {
             console.warn(`[STREAM-API] Alternative URL failed: ${altUrl}`, altError.message);
           }
+        }
+        
+        // If all alternatives fail, try comprehensive extraction with all extractors
+        console.log(`[STREAM-API] All alternative URLs failed, trying comprehensive extraction...`);
+        const comprehensiveData = await tryComprehensiveExtraction(link, type, controller.signal);
+        
+        if (comprehensiveData.length > 0) {
+          console.log(`[STREAM-API] Comprehensive extraction succeeded with ${comprehensiveData.length} streams`);
+          return NextResponse.json({data: comprehensiveData, source: 'comprehensive-extraction'});
         }
         
         // If all alternatives fail, return a helpful error message
