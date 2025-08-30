@@ -81,7 +81,10 @@ const enhancedExtractors = {
   gofileExtracter: async (link: string, signal: AbortSignal) => {
     try {
       console.log(`[PROVIDER-CONTEXT] gofileExtracter called with:`, link);
-      const result = await gofileExtracter(link, signal);
+      // Extract the ID from the link if it's a full URL
+      const url = new URL(link);
+      const id = url.pathname.split('/').pop() || link;
+      const result = await gofileExtracter(id);
       console.log(`[PROVIDER-CONTEXT] gofileExtracter result:`, result);
       return result;
     } catch (error: any) {
