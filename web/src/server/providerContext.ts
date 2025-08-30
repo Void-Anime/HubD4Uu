@@ -96,12 +96,15 @@ const enhancedExtractors = {
   superVideoExtractor: async (link: string, signal: AbortSignal) => {
     try {
       console.log(`[PROVIDER-CONTEXT] superVideoExtractor called with:`, link);
-      const result = await superVideoExtractor(link, signal);
+      // superVideoExtractor expects data content, not a URL
+      // We need to fetch the content first
+      const response = await axios.get(link, { signal });
+      const result = await superVideoExtractor(response.data);
       console.log(`[PROVIDER-CONTEXT] superVideoExtractor result:`, result);
       return result;
     } catch (error: any) {
       console.error(`[PROVIDER-CONTEXT] superVideoExtractor error:`, error.message);
-      return [];
+      return '';
     }
   },
   
@@ -142,5 +145,3 @@ export const providerContext = {
 };
 
 export type ProviderContext = typeof providerContext;
-
-
