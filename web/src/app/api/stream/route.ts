@@ -494,7 +494,6 @@ export async function GET(req: NextRequest) {
     // Log provider context for debugging
     console.log(`[STREAM-API] Provider context keys:`, Object.keys(providerContext));
     console.log(`[STREAM-API] Provider context axios:`, typeof providerContext.axios);
-    console.log(`[STREAM-API] Provider context cheerio:`, typeof providerContext.cheerio);
     console.log(`[STREAM-API] Provider context extractors:`, Object.keys(providerContext.extractors));
     console.log(`[STREAM-API] Provider context headers:`, Object.keys(providerContext.commonHeaders));
     

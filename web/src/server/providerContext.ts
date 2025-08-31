@@ -1,5 +1,4 @@
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import {headers} from './headers';
 import {getBaseUrl} from './getBaseUrl';
 import {superVideoExtractor} from './extractors/superVideo';
@@ -64,7 +63,6 @@ export const providerContext = {
   commonHeaders: headers,
   // Node: no expo-crypto; include a compatible subset if needed later
   Crypto: {} as any,
-  cheerio,
   extractors: {
     hubcloudExtracter,
     gofileExtracter,
