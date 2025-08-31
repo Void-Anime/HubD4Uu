@@ -1,12 +1,32 @@
-# FFmpeg Setup Guide
+# FFmpeg Setup Guide (LEGACY)
+
+> **⚠️ IMPORTANT: This document is for legacy deployments only.**
+> 
+> **For Vercel deployment, FFmpeg is no longer needed. The application now uses smart content detection and automatic fallback routing.**
+
+## 🚀 **Vercel Users: You're All Set!**
+
+If you're deploying to Vercel:
+- ✅ **No FFmpeg installation needed**
+- ✅ **Automatic content compatibility detection**
+- ✅ **Smart fallback routing**
+- ✅ **Fully serverless-compatible**
+
+Visit `/api/transcode/test` to see your environment status.
+
+## 📚 **For Non-Vercel Deployments**
+
+This guide is only needed if you're deploying to a traditional server or platform that supports FFmpeg installation.
 
 ## Overview
-This application uses FFmpeg for transcoding video files that aren't natively supported by browsers (like MKV, HEVC, etc.) into browser-compatible MP4 format.
+This application can use FFmpeg for transcoding video files that aren't natively supported by browsers (like MKV, HEVC, etc.) into browser-compatible MP4 format.
+
+**Note**: The Vercel-compatible version automatically detects browser compatibility and streams content directly when possible, eliminating the need for transcoding in most cases.
 
 ## Installation
 
 ### Automatic Installation (Recommended)
-The app automatically installs FFmpeg via `@ffmpeg-installer/ffmpeg` package. This should work out of the box.
+The app automatically installs FFmpeg via `@ffmpeg-installer/ffmpeg` package. This should work out of the box on traditional servers.
 
 ### Manual Installation
 If automatic installation fails, you can manually install FFmpeg:
@@ -113,3 +133,22 @@ This ensures maximum browser compatibility while maintaining reasonable quality.
 - Input validation prevents path traversal attacks
 - Process isolation prevents command injection
 - Timeout handling prevents hanging processes
+
+## Migration to Vercel
+
+If you're migrating from a traditional server to Vercel:
+
+1. **Remove FFmpeg dependency**: `npm uninstall @ffmpeg-installer/ffmpeg`
+2. **Update package.json**: Remove FFmpeg-related packages
+3. **Deploy to Vercel**: The app automatically detects the environment
+4. **Test endpoints**: Use `/api/transcode/test` to verify compatibility
+
+## Support
+
+- **Vercel users**: Check `/api/transcode/test` for environment status
+- **Traditional server users**: Follow this guide for FFmpeg setup
+- **General issues**: Refer to `VERCEL_TROUBLESHOOTING.md`
+
+---
+
+**Remember**: For Vercel deployment, FFmpeg is not needed. The application automatically handles content compatibility and provides reliable streaming for all video formats! 🎉

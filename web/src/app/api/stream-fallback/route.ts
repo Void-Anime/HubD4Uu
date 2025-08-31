@@ -1,227 +1,283 @@
-import {NextRequest, NextResponse} from 'next/server';
-import axios from 'axios';
-import * as cheerio from 'cheerio';
+import {NextRequest} from 'next/server';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Vercel Pro plan limit
 
 export async function GET(req: NextRequest) {
   try {
     const {searchParams} = new URL(req.url);
-    const link = searchParams.get('link') || '';
-    const type = searchParams.get('type') || 'movie';
+    const url = searchParams.get('url') || searchParams.get('link') || '';
+    const referer = searchParams.get('referer') || undefined;
     
-    console.log(`[STREAM-FALLBACK] Request: type=${type}, link=${link}`);
+    console.log(`[STREAM-FALLBACK] Processing URL: ${url}`);
     
-    if (!link) {
-      return NextResponse.json({error: 'link parameter required'}, {status: 400});
-    }
-    
-    // Try to extract content using fallback methods
-    const fallbackData = await extractWithFallbackMethods(link, type);
-    
-    if (fallbackData.length > 0) {
-      console.log(`[STREAM-FALLBACK] Successfully extracted ${fallbackData.length} streams`);
-      return NextResponse.json({
-        data: fallbackData,
-        source: 'fallback-extraction',
-        method: 'direct-parsing'
+    if (!url) {
+      return new Response(JSON.stringify({
+        error: 'URL parameter required',
+        message: 'Please provide a url or link parameter'
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
       });
     }
-    
-    return NextResponse.json({
-      error: 'Fallback extraction failed',
-      details: 'Unable to extract content using fallback methods',
-      suggestions: [
-        'The content may be protected by Cloudflare',
-        'Try accessing the URL manually in a browser',
-        'The content may have been removed',
-        'Try a different provider or URL'
-      ]
-    }, {status: 422});
-    
-  } catch (error: any) {
-    console.error(`[STREAM-FALLBACK] Error:`, error);
-    return NextResponse.json({
-      error: error.message || 'Unknown error occurred'
-    }, {status: 500});
-  }
-}
 
-async function extractWithFallbackMethods(url: string, type: string) {
-  const results: any[] = [];
-  
-  try {
-    console.log(`[STREAM-FALLBACK] Attempting fallback extraction for: ${url}`);
-    
-    // Method 1: Direct HTML parsing
-    const htmlData = await extractFromHTML(url);
-    if (htmlData.length > 0) {
-      results.push(...htmlData);
-      console.log(`[STREAM-FALLBACK] HTML extraction found ${htmlData.length} streams`);
+    if (!/^https?:\/\//i.test(url)) {
+      return new Response(JSON.stringify({
+        error: 'Invalid URL',
+        message: 'URL must be a valid HTTP/HTTPS link'
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
-    
-    // Method 2: Look for embedded players
-    const embeddedData = await extractEmbeddedPlayers(url);
-    if (embeddedData.length > 0) {
-      results.push(...embeddedData);
-      console.log(`[STREAM-FALLBACK] Embedded player extraction found ${embeddedData.length} streams`);
-    }
-    
-    // Method 3: Check for common video hosting patterns
-    const hostingData = await extractFromHostingPatterns(url);
-    if (hostingData.length > 0) {
-      results.push(...hostingData);
-      console.log(`[STREAM-FALLBACK] Hosting pattern extraction found ${hostingData.length} streams`);
-    }
-    
-  } catch (error: any) {
-    console.warn(`[STREAM-FALLBACK] Fallback extraction error:`, error.message);
-  }
-  
-  return results;
-}
 
-async function extractFromHTML(url: string) {
-  try {
-    const response = await axios.get(url, {
-      timeout: 30000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-      }
-    });
-    
-    const $ = cheerio.load(response.data);
-    const streams: any[] = [];
-    
-    // Look for video elements
-    $('video source').each((_, element) => {
-      const src = $(element).attr('src');
-      if (src) {
-        streams.push({
-          server: 'HTML5 Video',
-          link: src.startsWith('http') ? src : new URL(src, url).href,
-          type: 'mp4'
-        });
-      }
-    });
-    
-    // Look for iframe embeds
-    $('iframe').each((_, element) => {
-      const src = $(element).attr('src');
-      if (src && (src.includes('youtube') || src.includes('vimeo') || src.includes('dailymotion'))) {
-        streams.push({
-          server: 'Embedded Player',
-          link: src.startsWith('http') ? src : new URL(src, url).href,
-          type: 'iframe'
-        });
-      }
-    });
-    
-    return streams;
-    
-  } catch (error: any) {
-    console.warn(`[STREAM-FALLBACK] HTML extraction failed:`, error.message);
-    return [];
-  }
-}
-
-async function extractEmbeddedPlayers(url: string) {
-  try {
-    const response = await axios.get(url, {
-      timeout: 30000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-      }
-    });
-    
-    const $ = cheerio.load(response.data);
-    const streams: any[] = [];
-    
-    // Look for common video player patterns
-    const playerSelectors = [
-      '.video-player',
-      '.player',
-      '.stream-player',
-      '[data-video]',
-      '[data-src]',
-      '.embed-responsive'
-    ];
-    
-    playerSelectors.forEach(selector => {
-      $(selector).each((_, element) => {
-        const videoUrl = $(element).attr('data-video') || 
-                        $(element).attr('data-src') || 
-                        $(element).attr('src');
-        
-        if (videoUrl) {
-          streams.push({
-            server: 'Embedded Player',
-            link: videoUrl.startsWith('http') ? videoUrl : new URL(videoUrl, url).href,
-            type: 'mp4'
-          });
+    try {
+      // Attempt to fetch and stream the content directly
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': '*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          ...(referer && { 'Referer': referer })
         }
       });
-    });
-    
-    return streams;
-    
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      const contentLength = response.headers.get('content-length');
+      
+      console.log(`[STREAM-FALLBACK] Content-Type: ${contentType}, Length: ${contentLength}`);
+
+      // Check if this looks like video content
+      const isVideoContent = contentType.includes('video/') || 
+                            contentType.includes('application/') ||
+                            contentType.includes('audio/') ||
+                            url.match(/\.(mp4|m3u8|mkv|avi|mov|wmv|flv|webm|ts|m4v)$/i);
+
+      if (!isVideoContent) {
+        console.log(`[STREAM-FALLBACK] Content doesn't appear to be video, attempting HTML parsing`);
+        
+        // If not direct video, try to extract video URLs from HTML
+        const htmlContent = await response.text();
+        const extractedUrls = extractVideoUrlsFromHTML(htmlContent, url);
+        
+        if (extractedUrls.length > 0) {
+          console.log(`[STREAM-FALLBACK] Found ${extractedUrls.length} video URLs in HTML`);
+          return new Response(JSON.stringify({
+            success: true,
+            method: 'html-extraction',
+            videos: extractedUrls,
+            originalUrl: url
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+        
+        // If no video URLs found, return error with suggestions
+        return new Response(JSON.stringify({
+          error: 'No video content found',
+          message: 'The URL does not contain direct video content or extractable video links',
+          suggestions: [
+            'The URL may point to a webpage rather than a direct video file',
+            'Try to find the direct video link on the page',
+            'The video may be embedded in an iframe or player',
+            'Check if the video requires authentication or cookies'
+          ],
+          originalUrl: url,
+          contentType: contentType
+        }), {
+          status: 422,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Stream the video content directly
+      console.log(`[STREAM-FALLBACK] Streaming video content directly`);
+      
+      const headers = new Headers({
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*',
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-store',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+        'Transfer-Encoding': 'chunked'
+      });
+
+      // Copy relevant headers from the original response
+      if (contentLength) {
+        headers.set('Content-Length', contentLength);
+      }
+
+      // Copy other useful headers
+      const usefulHeaders = ['content-range', 'accept-ranges', 'last-modified', 'etag'];
+      usefulHeaders.forEach(header => {
+        const value = response.headers.get(header);
+        if (value) {
+          headers.set(header, value);
+        }
+      });
+
+      return new Response(response.body, {
+        status: 200,
+        headers
+      });
+
+    } catch (fetchError: any) {
+      console.error(`[STREAM-FALLBACK] Fetch error:`, fetchError);
+      
+      // Try alternative extraction methods if direct fetch fails
+      try {
+        console.log(`[STREAM-FALLBACK] Attempting alternative extraction methods`);
+        const extractedUrls = await extractWithAlternativeMethods(url);
+        
+        if (extractedUrls.length > 0) {
+          console.log(`[STREAM-FALLBACK] Alternative extraction found ${extractedUrls.length} URLs`);
+          return new Response(JSON.stringify({
+            success: true,
+            method: 'alternative-extraction',
+            videos: extractedUrls,
+            originalUrl: url,
+            note: 'Direct streaming failed, but found alternative video sources'
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+      } catch (extractionError: any) {
+        console.warn(`[STREAM-FALLBACK] Alternative extraction failed:`, extractionError.message);
+      }
+
+      return new Response(JSON.stringify({
+        error: 'Streaming failed',
+        message: fetchError.message || 'Unable to fetch or stream the content',
+        suggestions: [
+          'The URL may be protected by Cloudflare or similar services',
+          'Try accessing the URL manually in a browser',
+          'The content may have been removed or is region-restricted',
+          'Check if the video requires authentication, cookies, or specific headers',
+          'Try a different provider or URL'
+        ],
+        originalUrl: url,
+        details: fetchError.message
+      }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
   } catch (error: any) {
-    console.warn(`[STREAM-FALLBACK] Embedded player extraction failed:`, error.message);
-    return [];
+    console.error(`[STREAM-FALLBACK] General error:`, error);
+    return new Response(JSON.stringify({
+      error: 'Fallback processing failed',
+      message: error.message || 'An unexpected error occurred',
+      suggestions: [
+        'Check the URL format and accessibility',
+        'Verify the video source is still available',
+        'Try refreshing the page or using a different browser',
+        'Contact support if the issue persists'
+      ]
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
 
-async function extractFromHostingPatterns(url: string) {
+function extractVideoUrlsFromHTML(html: string, baseUrl: string): string[] {
+  const videoUrls: string[] = [];
+  
   try {
-    const response = await axios.get(url, {
-      timeout: 30000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
+    // Look for video source tags
+    const videoSourceRegex = /<source[^>]+src=["']([^"']+)["'][^>]*>/gi;
+    let match;
+    while ((match = videoSourceRegex.exec(html)) !== null) {
+      const url = match[1];
+      if (url && !url.startsWith('data:')) {
+        const fullUrl = url.startsWith('http') ? url : new URL(url, baseUrl).href;
+        videoUrls.push(fullUrl);
       }
-    });
-    
-    const content = response.data;
-    const streams: any[] = [];
-    
+    }
+
+    // Look for video tags with src attribute
+    const videoSrcRegex = /<video[^>]+src=["']([^"']+)["'][^>]*>/gi;
+    while ((match = videoSrcRegex.exec(html)) !== null) {
+      const url = match[1];
+      if (url && !url.startsWith('data:')) {
+        const fullUrl = url.startsWith('http') ? url : new URL(url, baseUrl).href;
+        videoUrls.push(fullUrl);
+      }
+    }
+
+    // Look for iframe embeds
+    const iframeRegex = /<iframe[^>]+src=["']([^"']+)["'][^>]*>/gi;
+    while ((match = iframeRegex.exec(html)) !== null) {
+      const url = match[1];
+      if (url && !url.startsWith('data:')) {
+        const fullUrl = url.startsWith('http') ? url : new URL(url, baseUrl).href;
+        videoUrls.push(fullUrl);
+      }
+    }
+
     // Look for common video hosting patterns
-    const patterns = [
-      /https?:\/\/[^\s"']*\.(?:mp4|m3u8|mkv|avi|mov|wmv|flv|webm)/gi,
+    const hostingPatterns = [
+      /https?:\/\/[^\s"']*\.(?:mp4|m3u8|mkv|avi|mov|wmv|flv|webm|ts|m4v)/gi,
       /https?:\/\/[^\s"']*\.(?:cloudflare|fastly|bunny|streamable)\.com[^\s"']*/gi,
       /https?:\/\/[^\s"']*\.(?:youtube|vimeo|dailymotion)\.com[^\s"']*/gi
     ];
-    
-    patterns.forEach(pattern => {
-      const matches = content.match(pattern);
+
+    hostingPatterns.forEach(pattern => {
+      const matches = html.match(pattern);
       if (matches) {
         matches.forEach(match => {
-          streams.push({
-            server: 'Direct Link',
-            link: match,
-            type: match.split('.').pop() || 'mp4'
-          });
+          if (!videoUrls.includes(match)) {
+            videoUrls.push(match);
+          }
         });
       }
     });
-    
-    return streams;
-    
+
   } catch (error: any) {
-    console.warn(`[STREAM-FALLBACK] Hosting pattern extraction failed:`, error.message);
-    return [];
+    console.warn(`[STREAM-FALLBACK] HTML parsing error:`, error.message);
   }
+
+  return [...new Set(videoUrls)]; // Remove duplicates
+}
+
+async function extractWithAlternativeMethods(url: string): Promise<string[]> {
+  const videoUrls: string[] = [];
+  
+  try {
+    // Try to fetch with different headers
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
+      }
+    });
+
+    if (response.ok) {
+      const html = await response.text();
+      const extracted = extractVideoUrlsFromHTML(html, url);
+      videoUrls.push(...extracted);
+    }
+
+  } catch (error: any) {
+    console.warn(`[STREAM-FALLBACK] Alternative method failed:`, error.message);
+  }
+
+  return videoUrls;
 }

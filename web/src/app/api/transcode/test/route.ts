@@ -1,11 +1,43 @@
 import {NextRequest} from 'next/server';
-import {spawn} from 'child_process';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest): Promise<Response> {
   try {
-    // Test FFmpeg path resolution
+    // In Vercel, we can't use child_process, so we'll provide environment information
+    const isVercel = process.env.VERCEL === '1';
+    const platform = process.platform;
+    const nodeVersion = process.version;
+    const environment = process.env.NODE_ENV;
+    
+    // Check if we're in a serverless environment
+    const isServerless = !process.env.VERCEL_ENV || process.env.VERCEL_ENV === 'production';
+    
+    if (isVercel || isServerless) {
+      return new Response(JSON.stringify({
+        available: false,
+        reason: 'Vercel serverless environment',
+        message: 'FFmpeg transcoding is not available in Vercel due to serverless limitations',
+        alternatives: [
+          'Use /api/stream-fallback for direct streaming',
+          'Content is automatically checked for browser compatibility',
+          'Redirects to fallback when transcoding is needed'
+        ],
+        environment: {
+          platform,
+          nodeVersion,
+          environment,
+          vercel: isVercel,
+          serverless: isServerless
+        },
+        fallbackRoute: '/api/stream-fallback'
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    
+    // For non-Vercel environments, provide FFmpeg information
     let ffmpegPath: string | null = null;
     
     // Try @ffmpeg-installer/ffmpeg
@@ -24,7 +56,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     if (!ffmpegPath) {
       return new Response(JSON.stringify({
         error: 'No FFmpeg path found',
-        available: false
+        available: false,
+        environment: {
+          platform,
+          nodeVersion,
+          environment,
+          vercel: isVercel,
+          serverless: isServerless
+        }
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
@@ -46,7 +85,14 @@ export async function GET(req: NextRequest): Promise<Response> {
         path: ffmpegPath,
         version: versionLine,
         codec: 'libx264',
-        audio: 'aac'
+        audio: 'aac',
+        environment: {
+          platform,
+          nodeVersion,
+          environment,
+          vercel: isVercel,
+          serverless: isServerless
+        }
       }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' }
@@ -56,7 +102,14 @@ export async function GET(req: NextRequest): Promise<Response> {
       return new Response(JSON.stringify({
         error: 'FFmpeg version check failed',
         message: execError.message,
-        available: false
+        available: false,
+        environment: {
+          platform,
+          nodeVersion,
+          environment,
+          vercel: isVercel,
+          serverless: isServerless
+        }
       }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
@@ -67,7 +120,14 @@ export async function GET(req: NextRequest): Promise<Response> {
     return new Response(JSON.stringify({
       error: 'Test failed',
       message: error.message,
-      available: false
+      available: false,
+      environment: {
+        platform: process.platform,
+        nodeVersion: process.version,
+        environment: process.env.NODE_ENV,
+        vercel: process.env.VERCEL === '1',
+        serverless: !process.env.VERCEL_ENV || process.env.VERCEL_ENV === 'production'
+      }
     }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
